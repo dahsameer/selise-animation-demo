@@ -64,12 +64,12 @@
 			const canvas = document.getElementById("v");
 			const section = canvas.closest("section");
 			let canvasWidth, canvasHeight;
-			let gl, program, positionBuffer, indexBuffer;
+			let gl, program, positionBuffer, vao;
 			let animationFrameId;
 			let time = 0;
 			let isAnimating = false;
-			let gridVertices = [];
-			let gridIndices = [];
+			let gridVertexCount = 0;
+			let gridNeedsUpdate = true;
 
 			function initWebGL() {
 				try {
@@ -160,11 +160,24 @@
 					gl.useProgram(program);
 
 					positionBuffer = gl.createBuffer();
-					indexBuffer = gl.createBuffer();
+
+					if (gl instanceof WebGL2RenderingContext) {
+						vao = gl.createVertexArray();
+						gl.bindVertexArray(vao);
+					}
+
+					gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+					const posLoc = gl.getAttribLocation(program, "position");
+					gl.enableVertexAttribArray(posLoc);
+					gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+					if (gl instanceof WebGL2RenderingContext) {
+						gl.bindVertexArray(null);
+					}
 
 					gl.enable(gl.BLEND);
 					gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
-					
+
 					gl.clearColor(0, 0, 0, 1);
 					return true;
 				} catch (error) {
@@ -174,20 +187,24 @@
 			}
 
 			function generateGrid() {
-				gridVertices = [];
-				gridIndices = [];
+				const gridVertices = [];
 				let vertexIndex = 0;
 
-				for (let y = -40; y < canvasHeight + 40; y += 20) {
-					for (let x = -40; x < canvasWidth + 40; x += 20) {
-						const posX = x + (canvasWidth % 20) / 2;
-						const posY = y + (canvasHeight % 20) / 2;
-
+				const spacing = 25;
+				for (let y = -spacing; y < canvasHeight + spacing; y += spacing) {
+					for (let x = -spacing; x < canvasWidth + spacing; x += spacing) {
+						const posX = x + (canvasWidth % spacing) / 2;
+						const posY = y + (canvasHeight % spacing) / 2;
 						gridVertices.push(posX, posY);
-						gridIndices.push(vertexIndex);
 						vertexIndex++;
 					}
 				}
+
+				gridVertexCount = vertexIndex;
+
+				gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+				gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(gridVertices), gl.STATIC_DRAW);
+				gridNeedsUpdate = false;
 			}
 
 			const resizeCanvas = () => {
@@ -215,9 +232,10 @@
 
 					const projLoc = gl.getUniformLocation(program, "projection");
 					gl.uniformMatrix4fv(projLoc, false, proj);
+					
+					gridNeedsUpdate = true;
+					generateGrid();
 				}
-
-				generateGrid();
 			};
 
 			window.addEventListener("resize", resizeCanvas);
@@ -240,18 +258,20 @@
 
 				gl.clear(gl.COLOR_BUFFER_BIT);
 
-				gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-				gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(gridVertices), gl.STATIC_DRAW);
-
-				const posLoc = gl.getAttribLocation(program, "position");
-				gl.enableVertexAttribArray(posLoc);
-				gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+				if (vao) {
+					gl.bindVertexArray(vao);
+				} else {
+					gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+					const posLoc = gl.getAttribLocation(program, "position");
+					gl.enableVertexAttribArray(posLoc);
+					gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+				}
 
 				gl.uniform1f(gl.getUniformLocation(program, "time"), time);
 				gl.uniform1f(gl.getUniformLocation(program, "canvasWidth"), canvasWidth);
 				gl.uniform1f(gl.getUniformLocation(program, "canvasHeight"), canvasHeight);
 
-				gl.drawArrays(gl.POINTS, 0, gridVertices.length / 2);
+				gl.drawArrays(gl.POINTS, 0, gridVertexCount);
 
 				animationFrameId = requestAnimationFrame(animate);
 			}
